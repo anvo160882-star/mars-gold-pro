@@ -1,1 +1,5 @@
-streamlit>=1.40\nrequests>=2.31\npandas>=2.1\nnumpy>=1.26\nplotly>=5.24\n
+streamlit>=1.40
+requests>=2.31
+pandas>=2.1
+numpy>=1.26
+plotly>=5.24
