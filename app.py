@@ -10,10 +10,17 @@ from plotly.subplots import make_subplots
 st.set_page_config(page_title="M.A.R.S. GOLD PRO V2", page_icon="✦", layout="wide")
 st.markdown("""
 <style>
-.block-container{padding-top:1.2rem;padding-bottom:2rem}
-[data-testid="stMetric"]{background:#101827;border:1px solid #243247;padding:14px;border-radius:12px}
-.stApp{background:#080e18;color:#e8eef8}
-h1,h2,h3{letter-spacing:.2px}
+.stApp{background:radial-gradient(ellipse at 50% -20%,#17243a 0%,#080d16 48%,#070b12 100%);color:#e8eef8}
+.block-container{max-width:1600px;padding:1.1rem 2rem 2.5rem}
+h1{font-size:2rem!important;font-weight:800!important;letter-spacing:-.7px}
+[data-testid="stMetric"]{background:linear-gradient(145deg,#121e2f,#0d1725);border:1px solid #26384e;padding:12px 16px;border-radius:10px}
+[data-testid="stMetricLabel"]{color:#8ea3bd!important;font-size:.75rem!important;text-transform:uppercase;letter-spacing:.08em}
+[data-testid="stMetricValue"]{font-size:1.65rem!important;font-weight:750!important;color:#f3f7fc}
+.stTabs [data-baseweb="tab-list"]{gap:8px;border-bottom:1px solid #26384e}
+.stTabs [data-baseweb="tab"]{background:#101a29;border:1px solid #24364c;border-radius:7px 7px 0 0;padding:10px 15px;color:#9eb0c7}
+.stTabs [aria-selected="true"]{background:#17304a!important;color:#69b7ff!important;border-bottom:2px solid #36a3ff!important}
+section[data-testid="stSidebar"]{background:#0b1320;border-right:1px solid #223247}
+.small-muted{color:#8fa3bb;font-size:.82rem}.kicker{color:#63b7ff;font-size:.72rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,16 +66,21 @@ def enrich(df):
     return x
 
 def chart_candles(df,title):
-    fig=make_subplots(rows=2,cols=1,shared_xaxes=True,vertical_spacing=.04,row_heights=[.78,.22])
-    fig.add_trace(go.Candlestick(x=df.time,open=df.o,high=df.h,low=df.l,close=df.c,name="XAU/USD",
-        increasing_line_color="#20c997",decreasing_line_color="#ff5c70"),row=1,col=1)
-    for col,color in [("ema20","#f5c451"),("ema50","#4da3ff"),("ema200","#b58cff")]:
-        if col in df: fig.add_trace(go.Scatter(x=df.time,y=df[col],name=col.upper(),line=dict(width=1.2,color=color)),row=1,col=1)
-    fig.add_trace(go.Bar(x=df.time,y=(df.h-df.l),name="Range",marker_color="#42536c"),row=2,col=1)
-    fig.update_layout(title=title,template="plotly_dark",height=610,margin=dict(l=10,r=10,t=45,b=10),
-      paper_bgcolor="#080e18",plot_bgcolor="#080e18",xaxis_rangeslider_visible=False,
-      legend=dict(orientation="h",y=1.02,x=0),hovermode="x unified")
-    fig.update_yaxes(title="USD/oz",row=1,col=1)
+    fig=go.Figure()
+    fig.add_trace(go.Candlestick(x=df.time,open=df.o,high=df.h,low=df.l,close=df.c,name="XAUUSD",
+        increasing_line_color="#16c784",decreasing_line_color="#ea3943",
+        increasing_fillcolor="#16c784",decreasing_fillcolor="#ea3943",whiskerwidth=.45))
+    for col,color in [("ema20","#f5b942"),("ema50","#48a6ff"),("ema200","#b18cff")]:
+        if col in df: fig.add_trace(go.Scatter(x=df.time,y=df[col],name=col.upper(),line=dict(width=1.35,color=color)))
+    if len(df):
+        last=float(df.c.iloc[-1])
+        fig.add_hline(y=last,line_dash="dot",line_color="#d6e2f0",opacity=.55,annotation_text=f" {last:,.2f} ",annotation_position="right",annotation_font_color="#eaf2fc")
+    fig.update_layout(title=dict(text=title,font=dict(size=15,color="#dce8f7")),template="plotly_dark",height=690,
+      margin=dict(l=12,r=28,t=48,b=12),paper_bgcolor="#0a111c",plot_bgcolor="#0a111c",
+      xaxis_rangeslider_visible=True,xaxis_rangeslider_thickness=.055,
+      legend=dict(orientation="h",y=1.04,x=0,font=dict(size=11,color="#a9bdd4")),hovermode="x unified",dragmode="pan",
+      font=dict(family="Arial",color="#b9c9dc"),xaxis=dict(showgrid=True,gridcolor="#1b2a3b",showspikes=True,spikemode="across",spikesnap="cursor",spikethickness=1),
+      yaxis=dict(title="USD / oz",side="right",showgrid=True,gridcolor="#1b2a3b",showspikes=True,tickformat=",.2f"))
     return fig
 
 def mc_surface(df):
@@ -98,8 +110,9 @@ def mc_surface(df):
       paper_bgcolor="#080e18",margin=dict(l=0,r=0,t=45,b=0))
     return fig,vol,sims
 
-st.title("✦ M.A.R.S. GOLD PRO V2")
-st.caption("XAU/USD · Quant research terminal · Minute refresh · Data provenance visible")
+st.markdown('<div class="kicker">PRECISION MARKET INTELLIGENCE · XAU/USD</div>',unsafe_allow_html=True)
+st.title("M.A.R.S. GOLD PRO")
+st.caption("V2 TERMINAL  ·  LIVE REFERENCE  ·  MULTI-TIMEFRAME RESEARCH")
 with st.sidebar:
     st.subheader("Market controls")
     tf=st.selectbox("Chart timeframe",["15m","1h","4h","5m","1m"],index=0)
@@ -125,7 +138,7 @@ except Exception as e:
 
 last=float(df.c.iloc[-1]) if not df.empty else spot
 chg=((df.c.iloc[-1]/df.c.iloc[-2])-1)*100 if len(df)>1 else None
-a,b,c,d=st.columns(4)
+a,b,c,d=st.columns([1.15,1.15,1,0.8])
 a.metric("XAU/USD reference",f"${spot:,.2f}" if spot else "Unavailable")
 b.metric("OHLC last close",f"${last:,.2f}" if last else "—",f"{chg:+.2f}%" if chg is not None else None)
 c.metric("Feed status",spot_status)
@@ -133,9 +146,11 @@ d.metric("Data age",f"{age}s" if age is not None else "Not reported")
 st.caption(f"Reference updated: {updated or 'Not reported'} · UI refresh is manual/on rerun; source cache target 55s.")
 tabs=st.tabs(["MARKET ANALYSIS","PROBABILITY ZONES","3D FORECAST","TRADE INTELLIGENCE","DATA HEALTH"])
 with tabs[0]:
-    st.subheader("Price action & market structure")
+    st.subheader("PRICE ACTION & MARKET STRUCTURE")
+    st.markdown('<div class="small-muted">Candles · EMA overlays · Crosshair · Zoom · Pan · Range selector</div>',unsafe_allow_html=True)
     if not df.empty:
-        st.plotly_chart(chart_candles(df,f"XAU/USD · {tf} · {period}"),use_container_width=True,config={"displaylogo":False,"scrollZoom":True})
+        fig=chart_candles(df,f"XAU/USD  /  {tf.upper()}  /  {period.upper()}")
+        st.plotly_chart(fig,use_container_width=True,config={"displaylogo":False,"scrollZoom":True,"modeBarButtonsToAdd":["drawline","drawrect","eraseshape"]})
         recent=df.tail(100)
         support=float(recent.l.min()); resistance=float(recent.h.max())
         x,y,z=st.columns(3); x.metric("EMA 20",f"{df.ema20.iloc[-1]:,.2f}"); y.metric("EMA 50",f"{df.ema50.iloc[-1]:,.2f}"); z.metric("EMA 200",f"{df.ema200.iloc[-1]:,.2f}")
