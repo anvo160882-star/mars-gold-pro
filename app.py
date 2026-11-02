@@ -1,173 +1,449 @@
-
 import streamlit as st
-import streamlit.components.v1 as components
-import requests, pandas as pd, numpy as np, json
+import pandas as pd
+import numpy as np
+import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from datetime import datetime, timezone
+from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="M.A.R.S. GOLD PRO V2.4",page_icon="✦",layout="wide")
-st.markdown("""<style>
-.block-container{max-width:1850px;padding:1rem 1.35rem}
-[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background:#070d17}
-[data-testid="stMetric"]{background:linear-gradient(145deg,#101d30,#0b1422);border:1px solid #233751;border-radius:10px;padding:12px}
-[data-testid="stMetricLabel"]{color:#91a3bc;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
-[data-testid="stMetricValue"]{font-size:23px;color:#edf4ff}
-.stTabs [data-baseweb="tab-list"]{gap:20px}
-.stTabs [data-baseweb="tab"]{font-size:12px;color:#9aabc2}
-div[data-testid="stAlert"]{border-radius:10px}
-</style>""",unsafe_allow_html=True)
-API="https://xaus.com/api/v1"; H={"User-Agent":"MARS-GOLD-PRO-V2.4","Accept":"application/json"}
+# ============================================================
+# M.A.R.S. GOLD PRO — Streamlit rebuild
+# Real XAUS public spot + daily history; optional broker CSVs.
+# No fabricated intraday OHLC, no uncalibrated trade signals.
+# ============================================================
 
-@st.cache_data(ttl=50)
-def spot_data():
- r=requests.get(API+"/spot?compact=1",headers=H,timeout=12);r.raise_for_status();j=r.json();d=j.get("data",j)
- return d.get("spot_usd_oz") or j.get("spot_usd_oz"),d.get("data_state") or j.get("data_state") or {},j
-@st.cache_data(ttl=50)
-def bars_data(tf,period):
- r=requests.get(API+"/chart",params={"symbol":"xau","range":period,"interval":tf},headers=H,timeout=25);r.raise_for_status();j=r.json();d=j.get("data",j)
- rows=d.get("candles") or d.get("points") or d.get("values") or j.get("candles") or j.get("points") or []
- if isinstance(rows,dict):rows=rows.get("candles",[])
- x=pd.DataFrame(rows)
- if x.empty:return x
- x=x.rename(columns={"timestamp":"t","time":"t","open":"o","high":"h","low":"l","close":"c"})
- if not set(["t","o","h","l","c"]).issubset(x.columns):return pd.DataFrame()
- x["dt"]=pd.to_datetime(x.t,unit="s",utc=True,errors="coerce") if pd.api.types.is_numeric_dtype(x.t) else pd.to_datetime(x.t,utc=True,errors="coerce")
- for k in ["o","h","l","c"]:x[k]=pd.to_numeric(x[k],errors="coerce")
- return x.dropna(subset=["dt","o","h","l","c"]).sort_values("dt").drop_duplicates("dt").tail(3000).reset_index(drop=True)
+st.set_page_config(
+    page_title="M.A.R.S. GOLD PRO",
+    page_icon="🟡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-def sim(df):
- r=np.diff(np.log(df.c.values));v=max(float(np.std(r[-240:])),.00015);p=float(df.c.iloc[-1])
- hs=np.array([4,8,12,24,48,72,120,168.],float);rng=np.random.default_rng(24)
- paths=p*np.exp(rng.normal(0,v,size=(5000,len(hs)))*np.sqrt(hs)[None,:])
- return hs,np.quantile(paths,[.05,.10,.25,.5,.75,.9,.95],axis=0),paths,v
+C = {
+    "bg": "#080E18", "panel": "#111D2C", "panel2": "#16263A",
+    "line": "#28394E", "muted": "#91A3B9", "text": "#EDF3FA",
+    "gold": "#EDC45E", "green": "#31C18E", "red": "#EF6B7B",
+    "blue": "#6EA8FE", "amber": "#E8B45C",
+}
+st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+html, body, [class*="css"] {{ font-family: 'Manrope', sans-serif; }}
+.stApp {{ background: radial-gradient(ellipse at 55% -12%, #1B3048 0%, {C['bg']} 52%); color:{C['text']}; }}
+[data-testid="stSidebar"] {{ background:#0B1421; border-right:1px solid {C['line']}; }}
+.block-container {{ padding-top:1.2rem; max-width:1600px; }}
+h1,h2,h3 {{ letter-spacing:-.035em; }}
+h1 {{ font-weight:800; }}
+.mars-eyebrow {{ color:{C['gold']}; font-size:10px; font-weight:800; letter-spacing:.20em; }}
+.mars-sub {{ color:{C['muted']}; font-size:12px; }}
+.mars-card {{ background:linear-gradient(145deg,#142338,#101A28); border:1px solid {C['line']};
+ border-radius:14px; padding:15px 17px; min-height:104px; }}
+.mars-k {{ color:{C['muted']}; font-size:10px; letter-spacing:.12em; font-weight:800; text-transform:uppercase; }}
+.mars-v {{ color:{C['text']}; font-size:26px; font-weight:800; margin-top:5px; line-height:1.2; }}
+.mars-hint {{ color:{C['muted']}; font-size:11px; margin-top:5px; }}
+.mars-section {{ color:{C['gold']}; font-size:10px; font-weight:800; letter-spacing:.18em; }}
+.mars-note {{ border-left:3px solid {C['amber']}; background:#211D15; padding:11px 14px;
+ border-radius:0 9px 9px 0; color:#E5D6B5; font-size:12px; }}
+.mars-good {{ color:{C['green']}; }} .mars-bad {{ color:{C['red']}; }}
+div[data-testid="stMetric"] {{ background:linear-gradient(145deg,#142338,#101A28);
+ border:1px solid {C['line']}; padding:13px 15px; border-radius:12px; }}
+div[data-testid="stMetricLabel"] {{ color:{C['muted']}; }}
+div[data-testid="stMetricValue"] {{ font-family:'DM Mono',monospace; }}
+.stButton>button {{ border-radius:9px; border:1px solid #465B73; background:#17283D; color:#EDF3FA; }}
+.stButton>button:hover {{ border-color:{C['gold']}; color:{C['gold']}; }}
+.stTabs [data-baseweb="tab"] {{ color:{C['muted']}; }}
+hr {{ border-color:{C['line']}; }}
+small {{ color:{C['muted']}; }}
+</style>
+""", unsafe_allow_html=True)
 
-def dark(fig,height=480):
- fig.update_layout(template="plotly_dark",height=height,paper_bgcolor="#070d17",plot_bgcolor="#0b1422",
-  font=dict(color="#c5d2e4",family="Arial"),margin=dict(l=24,r=24,t=58,b=24),
-  legend=dict(orientation="h",y=1.12,x=0),hovermode="x unified")
- fig.update_xaxes(gridcolor="#1b2b40",zerolinecolor="#1b2b40")
- fig.update_yaxes(gridcolor="#1b2b40",zerolinecolor="#1b2b40")
- return fig
+PLOT_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color=C["muted"], family="Manrope", size=11),
+    margin=dict(l=42, r=18, t=30, b=38),
+    xaxis=dict(gridcolor="rgba(145,163,185,.13)", zerolinecolor=C["line"]),
+    yaxis=dict(gridcolor="rgba(145,163,185,.13)", zerolinecolor=C["line"]),
+    legend=dict(orientation="h", y=1.12, x=0),
+    hovermode="x unified",
+)
 
-st.markdown("""<div style="display:flex;justify-content:space-between;border-bottom:1px solid #24364d;padding-bottom:13px">
-<div><div style="font-size:25px;font-weight:800;color:#eef5ff">✦ M.A.R.S. <span style="color:#66b2ff">GOLD PRO</span> <span style="font-size:12px;color:#8298b5">V2.4 QUANT WORKSTATION</span></div>
-<div style="font-size:10px;letter-spacing:2px;color:#8194ae">XAU/USD · PROBABILITY VISUALIZATION · TRADE DECISION ENGINE</div></div>
-<div style="font-size:10px;color:#7d91a9;text-align:right">LIVE RESEARCH TERMINAL<br>DATA INTEGRITY FIRST</div></div>""",unsafe_allow_html=True)
+BASE = "https://xaus.com/api/v1/"
+
+@st.cache_data(ttl=55, show_spinner=False)
+def fetch_json(path):
+    r = requests.get(BASE + path, timeout=15, headers={"User-Agent":"MARS-GOLD-PRO/1.0"})
+    r.raise_for_status()
+    return r.json()
+
+@st.cache_data(ttl=55, show_spinner=False)
+def load_public_data():
+    spot = fetch_json("spot?compact=1")
+    hist = fetch_json("history")
+    intraday = fetch_json("intraday?symbol=xau&hours=48")
+    price = float(spot.get("spot_usd_oz"))
+    points = hist.get("points", [])
+    ipoints = intraday.get("points", [])
+    if not np.isfinite(price) or not points:
+        raise ValueError("API không trả về spot hoặc daily history hợp lệ.")
+    df = pd.DataFrame(points)
+    df["date"] = pd.to_datetime(df["d"], errors="coerce", utc=True)
+    for col in ["o", "h", "l", "c"]:
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["date", "c"]).sort_values("date").drop_duplicates("date")
+    return spot, price, df, ipoints
+
+def fmt_price(x):
+    return "—" if x is None or not np.isfinite(float(x)) else f"${float(x):,.2f}"
+
+def card(label, value, hint="", color=None):
+    col = color or C["text"]
+    st.markdown(f"""<div class="mars-card"><div class="mars-k">{label}</div>
+    <div class="mars-v" style="color:{col}">{value}</div>
+    <div class="mars-hint">{hint}</div></div>""", unsafe_allow_html=True)
+
+def plotly_chart(fig, height=None):
+    fig.update_layout(**PLOT_LAYOUT)
+    if height:
+        fig.update_layout(height=height)
+    st.plotly_chart(fig, use_container_width=True, config={"displaylogo":False, "scrollZoom":True})
+
+def normalize_csv(upload, expected):
+    if upload is None:
+        return None, "Chưa tải file"
+    try:
+        df = pd.read_csv(upload)
+        mapping = {str(c).strip().lower(): c for c in df.columns}
+        aliases = {
+            "time": ["time","timestamp","date","datetime","gmt time"],
+            "open": ["open","o"], "high": ["high","h"],
+            "low": ["low","l"], "close": ["close","c","last"],
+            "volume": ["volume","vol","tick_volume"],
+        }
+        found = {}
+        for target, names in aliases.items():
+            for n in names:
+                if n in mapping:
+                    found[target] = mapping[n]; break
+        required = ["time","open","high","low","close"]
+        if any(k not in found for k in required):
+            return None, "Thiếu cột bắt buộc: timestamp, open, high, low, close"
+        out = pd.DataFrame()
+        out["time"] = pd.to_datetime(df[found["time"]], errors="coerce", utc=True)
+        for k in ["open","high","low","close"]:
+            out[k] = pd.to_numeric(df[found[k]], errors="coerce")
+        out["volume"] = pd.to_numeric(df[found["volume"]], errors="coerce") if "volume" in found else np.nan
+        out = out.dropna(subset=required).sort_values("time").drop_duplicates("time").reset_index(drop=True)
+        if len(out) < 80:
+            return out, f"Chỉ có {len(out)} nến — chưa đủ để xác nhận cấu trúc"
+        if (out["high"] < out["low"]).any() or (out["high"] < out[["open","close"]].max(axis=1)).any() or (out["low"] > out[["open","close"]].min(axis=1)).any():
+            return None, "OHLC không hợp lệ: kiểm tra High/Low"
+        return out, f"{len(out):,} nến · {out.time.min():%Y-%m-%d} → {out.time.max():%Y-%m-%d} UTC"
+    except Exception as e:
+        return None, f"Không đọc được CSV: {e}"
+
+def ema(s, n):
+    return s.ewm(span=n, adjust=False).mean()
+
+def atr(df, n=14):
+    prev = df["close"].shift(1)
+    tr = pd.concat([(df["high"]-df["low"]), (df["high"]-prev).abs(), (df["low"]-prev).abs()], axis=1).max(axis=1)
+    return tr.rolling(n).mean()
+
+def swing_levels(df, window=80):
+    d = df.tail(window)
+    return float(d["low"].min()), float(d["high"].max())
+
+def analyze_tf(df):
+    if df is None or len(df) < 80:
+        return {"ready":False, "bias":"NOT VERIFIED"}
+    x = df.copy()
+    x["ema20"] = ema(x.close,20); x["ema50"] = ema(x.close,50)
+    x["atr"] = atr(x)
+    last = x.iloc[-1]
+    bias = "BULLISH" if last.close > last.ema20 > last.ema50 else ("BEARISH" if last.close < last.ema20 < last.ema50 else "MIXED")
+    low, high = swing_levels(x)
+    return {"ready":True,"bias":bias,"last":float(last.close),"ema20":float(last.ema20),
+            "ema50":float(last.ema50),"atr":float(last.atr) if pd.notna(last.atr) else np.nan,
+            "support":low,"resistance":high,"time":last.time}
+
+def candle_fig(df, title):
+    x=df.copy()
+    x["ema20"]=ema(x.close,20); x["ema50"]=ema(x.close,50)
+    fig=go.Figure()
+    fig.add_trace(go.Candlestick(x=x.time,open=x.open,high=x.high,low=x.low,close=x.close,
+        name="OHLC",increasing_line_color=C["green"],decreasing_line_color=C["red"]))
+    fig.add_trace(go.Scatter(x=x.time,y=x.ema20,name="EMA 20",line=dict(color=C["gold"],width=1.5)))
+    fig.add_trace(go.Scatter(x=x.time,y=x.ema50,name="EMA 50",line=dict(color=C["blue"],width=1.5)))
+    fig.update_layout(title=title, height=560, xaxis_rangeslider_visible=False)
+    return fig
+
+def daily_history_candles(daily):
+    # XAUS daily history may not expose open. Reconstructed open is explicitly labelled.
+    x=daily.copy()
+    if "o" not in x or x["o"].isna().all():
+        x["open_rebuilt"] = x["c"].shift(1).fillna(x["c"])
+        x["open_source"] = "Previous close (reconstructed)"
+    else:
+        x["open_rebuilt"] = x["o"]
+        x["open_source"] = "Provider OHLC"
+    x["high"] = x["h"] if "h" in x else x["c"]
+    x["low"] = x["l"] if "l" in x else x["c"]
+    x["close"] = x["c"]
+    return x.dropna(subset=["high","low","close"])
+
+# Sidebar / navigation
+with st.sidebar:
+    st.markdown('<div class="mars-eyebrow">QUANT RESEARCH TERMINAL</div>', unsafe_allow_html=True)
+    st.markdown("## 🟡 M.A.R.S. GOLD PRO")
+    st.caption("XAU/USD · Decision support")
+    page = st.radio("WORKSPACE", ["01  Market Analysis","02  Probability Zones","03  3D Forecast","04  Trade Intelligence","05  Data Health"], label_visibility="collapsed")
+    st.divider()
+    st.markdown("**DATA CONTROL**")
+    auto = st.toggle("Auto refresh · 60 sec", value=True)
+    if auto:
+        st_autorefresh(interval=60_000, key="mars_refresh")
+    if st.button("↻ Refresh data now", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.caption("Giá tham chiếu XAUS · Không phải giá khớp lệnh broker.")
+    st.divider()
+    st.caption("M.A.R.S. sequence")
+    st.code("Major S/R → H4 bias → reaction → momentum → R:R ≥ 1:2 → sizing", language="text")
+
+# Load public feed
+feed_error = None
+spot_obj = None; spot_price = None; daily = pd.DataFrame(); intra = []
 try:
- spot,state,raw=spot_data();feed=(state.get("state") or state.get("status") or "UNKNOWN").upper();age=state.get("age_seconds")
-except Exception:
- spot,state,raw=None,{},{};feed="UNAVAILABLE";age=None
-a,b,c,d=st.columns(4)
-a.metric("XAU/USD REFERENCE",f"${float(spot):,.2f}" if spot else "Unavailable")
-b.metric("SPOT FEED",feed);c.metric("DATA AGE",f"{age}s" if age is not None else "—");d.metric("SOURCE","XAUS · indicative")
-p,q,r,s=st.columns([1,1,1,1])
-tf=p.selectbox("TIMEFRAME",["1m","5m","15m","1h","4h","1d"],2)
-period=q.selectbox("HISTORY",["1mo","3mo","6mo","1y","2y","5y"],2)
-ema20=r.toggle("EMA 20",True);ema50=s.toggle("EMA 50",True)
-try:df=bars_data(tf,period);err=None
-except Exception as ex:df=pd.DataFrame();err=str(ex)
-if not df.empty:
- for n in [20,50,200]:df[f"e{n}"]=df.c.ewm(span=n,adjust=False).mean()
-tabs=st.tabs(["01 MARKET ANALYSIS","02 PROBABILITY ZONES","03 3D FORECAST","04 TRADE INTELLIGENCE","05 DATA HEALTH"])
-with tabs[0]:
- st.markdown("#### PRICE ACTION & MARKET STRUCTURE")
- if len(df):
-  bd=[{"time":int(t.timestamp()),"open":float(o),"high":float(h),"low":float(l),"close":float(c)} for t,o,h,l,c in zip(df.dt,df.o,df.h,df.l,df.c)]
-  ls={}
-  for n,on in [(20,ema20),(50,ema50),(200,len(df)>=200)]:
-   if on:ls[str(n)]=[{"time":int(t.timestamp()),"value":float(v)} for t,v in zip(df.dt,df[f"e{n}"])]
-  payload=json.dumps({"bars":bd,"lines":ls,"tf":tf})
-  h=r"""<!doctype html><html><head><script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script><style>body{margin:0;background:#070d17;color:#c9d7e9;font:12px Arial}#chart{height:590px}#h{padding:10px;border-bottom:1px solid #22344c}</style></head><body><div id="h">XAU/USD　·　<span id="tf"></span>　·　Candles / EMA / Crosshair / Zoom</div><div id="chart"></div><script>const D=__D__;document.getElementById('tf').textContent=D.tf;let e=document.getElementById('chart');let c=LightweightCharts.createChart(e,{width:e.clientWidth,height:590,layout:{background:{type:'solid',color:'#070d17'},textColor:'#9aacc4'},grid:{vertLines:{color:'#192a40'},horzLines:{color:'#192a40'}},rightPriceScale:{borderColor:'#263b55'},timeScale:{borderColor:'#263b55',timeVisible:true},crosshair:{mode:0},handleScroll:true,handleScale:true});let x=c.addCandlestickSeries({upColor:'#19bf91',downColor:'#f05b70',wickUpColor:'#19bf91',wickDownColor:'#f05b70',borderUpColor:'#19bf91',borderDownColor:'#f05b70'});x.setData(D.bars);for(let [k,col] of [['20','#f5c85d'],['50','#55aaff'],['200','#b58cff']])if(D.lines[k]){let z=c.addLineSeries({color:col,lineWidth:2,priceLineVisible:false});z.setData(D.lines[k])}c.timeScale().fitContent();new ResizeObserver(a=>c.applyOptions({width:a[0].contentRect.width})).observe(e)</script></body></html>""".replace("__D__",payload)
-  left,right=st.columns([4.3,1])
-  with left:components.html(h,height=625)
-  with right:
-   z=df.iloc[-1];st.metric("LAST CLOSE",f"${z.c:,.2f}");st.metric("EMA20",f"${z.e20:,.2f}");st.metric("EMA50",f"${z.e50:,.2f}");st.metric("EMA200",f"${z.e200:,.2f}" if len(df)>=200 else "N/A")
- else:st.error(f"OHLC unavailable: {err or 'No valid bars'}")
-with tabs[1]:
- st.markdown("#### PROBABILITY ZONES · DISTRIBUTION FAN")
- if len(df)>30:
-  hs,qq,paths,v=sim(df);labels=["4H","8H","12H","24H","48H","3D","5D","7D"];now=float(df.c.iloc[-1])
-  f=go.Figure()
-  # layered percentile envelopes
-  f.add_trace(go.Scatter(x=labels,y=qq[6],line=dict(width=0),showlegend=False,hoverinfo="skip"))
-  f.add_trace(go.Scatter(x=labels,y=qq[0],line=dict(width=0),fill="tonexty",fillcolor="rgba(238,83,104,.18)",name="90% outer band"))
-  f.add_trace(go.Scatter(x=labels,y=qq[5],line=dict(width=0),showlegend=False,hoverinfo="skip"))
-  f.add_trace(go.Scatter(x=labels,y=qq[1],line=dict(width=0),fill="tonexty",fillcolor="rgba(244,184,75,.20)",name="80% band"))
-  f.add_trace(go.Scatter(x=labels,y=qq[4],line=dict(width=0),showlegend=False,hoverinfo="skip"))
-  f.add_trace(go.Scatter(x=labels,y=qq[2],line=dict(width=0),fill="tonexty",fillcolor="rgba(37,184,139,.24)",name="50% core"))
-  f.add_trace(go.Scatter(x=labels,y=qq[3],line=dict(color="#ffe08a",width=3),mode="lines+markers",name="Median path"))
-  f.add_hline(y=now,line_dash="dash",line_color="#d3deed",annotation_text=f"Spot {now:,.2f}")
-  f.update_layout(title="Forward price cone · Monte Carlo quantile envelopes",yaxis_title="XAU/USD · USD/oz",xaxis_title="Forecast horizon")
-  st.plotly_chart(dark(f,500),use_container_width=True)
-  u,vv,w=st.columns(3)
-  u.metric("24H MEDIAN",f"${qq[3,3]:,.2f}",f"{(qq[3,3]/now-1)*100:+.2f}%")
-  vv.metric("24H 80% RANGE",f"${qq[1,3]:,.0f} – ${qq[5,3]:,.0f}")
-  prob=float((paths[:,3]>now).mean()*100);w.metric("SIMULATED UPSIDE SHARE",f"{prob:.1f}%")
-  # Distribution ridgeline-style heatmap
-  st.markdown("#### PRICE PROBABILITY MAP · TIME × PRICE")
-  price_grid=np.linspace(np.quantile(paths,.01),np.quantile(paths,.99),70)
-  density=np.array([np.histogram(paths[:,i],bins=price_grid,density=True)[0] for i in range(len(hs))]).T
-  heat=go.Figure(go.Heatmap(x=labels,y=(price_grid[:-1]+price_grid[1:])/2,z=density,colorscale="Turbo",colorbar=dict(title="Density")))
-  heat.update_layout(title="Where simulated prices cluster at each horizon",xaxis_title="Horizon",yaxis_title="Price (USD/oz)")
-  st.plotly_chart(dark(heat,430),use_container_width=True)
-  st.caption("Quantile envelopes and density map are generated from historical-return Monte Carlo simulations. They are not calibrated probabilities or validated forecasts.")
- else:st.warning("Need more valid OHLC bars.")
-with tabs[2]:
- st.markdown("#### 3D FORECAST · PRICE DENSITY SURFACE")
- if len(df)>30:
-  hs,qq,paths,v=sim(df);g=np.linspace(np.quantile(paths,.01),np.quantile(paths,.99),65)
-  dens=np.array([np.histogram(paths[:,i],bins=g,density=True)[0] for i in range(len(hs))]).T
-  yy=(g[:-1]+g[1:])/2;X,Y=np.meshgrid(hs,yy)
-  fig=go.Figure(go.Surface(x=X,y=Y,z=dens,colorscale="Turbo",opacity=.96,contours={"z":{"show":True,"usecolormap":True,"project_z":True}},colorbar=dict(title="Density")))
-  fig.update_layout(title="Interactive 3D scenario density · 5,000 paths",scene=dict(xaxis_title="Hours forward",yaxis_title="Price USD/oz",zaxis_title="Probability density",camera=dict(eye=dict(x=1.7,y=1.6,z=1.2))),uirevision="mars3d")
-  st.plotly_chart(dark(fig,680),use_container_width=True)
-  st.caption(f"Historical volatility input: {v*100:.4f}% per bar · drag to rotate · scroll to zoom.")
- else:st.warning("Need more valid OHLC bars.")
-with tabs[3]:
- st.markdown("#### TRADE INTELLIGENCE · M.A.R.S. DECISION COCKPIT")
- if len(df)>50:
-  z=df.iloc[-1];delta=df.c.diff();gain=delta.clip(lower=0).rolling(14).mean().iloc[-1];loss=(-delta.clip(upper=0)).rolling(14).mean().iloc[-1]
-  rsi=100-100/(1+gain/loss) if loss and np.isfinite(loss) else 50
-  atr=pd.concat([df.h-df.l,(df.h-df.c.shift()).abs(),(df.l-df.c.shift()).abs()],axis=1).max(axis=1).rolling(14).mean().iloc[-1]
-  bias="BULLISH" if z.c>z.e20>z.e50 else ("BEARISH" if z.c<z.e20<z.e50 else "MIXED")
-  x1,x2,x3,x4=st.columns(4);x1.metric("MARKET BIAS",bias);x2.metric("RSI 14",f"{rsi:.1f}");x3.metric("ATR 14",f"{atr:.2f}");x4.metric("PRICE",f"${z.c:,.2f}")
-  # gauge for RSI
-  gauge=go.Figure(go.Indicator(mode="gauge+number",value=float(rsi),title={"text":"Momentum · RSI 14"},gauge={"axis":{"range":[0,100]},"bar":{"color":"#69b5ff"},"steps":[{"range":[0,30],"color":"#174d48"},{"range":[30,70],"color":"#26374f"},{"range":[70,100],"color":"#633044"}],"threshold":{"line":{"color":"#f3ca67","width":3},"value":50}}))
-  gauge.update_layout(height=260,margin=dict(l=20,r=20,t=40,b=10),paper_bgcolor="#070d17",font={"color":"#dbe7f5"})
-  st.plotly_chart(gauge,use_container_width=True)
- else:bias="INSUFFICIENT DATA";rsi=atr=np.nan
- st.markdown("#### SETUP VALIDATION PIPELINE")
- stages=[("01 · MAJOR S/R","Identify reaction zones","PENDING FULL STRUCTURE ENGINE"),("02 · H4 BIAS","Higher-timeframe direction","NOT VERIFIED"),("03 · PRICE REACTION","Rejection / acceptance / sweep","WAIT FOR CONFIRMATION"),("04 · MOMENTUM","RSI / EMA proxy","OBSERVATIONAL ONLY"),("05 · RISK / REWARD","Minimum 1:2","NO VALID SETUP"),("06 · POSITION SIZE","Risk-based sizing","LOCKED")]
- cols=st.columns(3)
- for i,(title,desc,status) in enumerate(stages):
-  with cols[i%3]:
-   st.markdown(f"""<div style="background:linear-gradient(145deg,#12243a,#0b1421);border:1px solid #263d59;border-radius:12px;padding:15px;min-height:126px;margin-bottom:10px"><div style="color:#70b8ff;font-size:11px;font-weight:700">{title}</div><div style="color:#e4edf8;font-size:14px;font-weight:600;margin:8px 0">{desc}</div><div style="color:#e7bd6d;font-size:10px;letter-spacing:.06em">{status}</div></div>""",unsafe_allow_html=True)
- st.error("NO TRADE · BUY/SELL bị khóa cho đến khi xác thực H4/H1/M15, broker spread, giá khớp lệnh và walk-forward backtest.")
- st.caption("M.A.R.S. sequence: Major S/R → H4 bias → price reaction → momentum/structure → R:R ≥ 1:2 → position sizing.")
-with tabs[4]:
- st.markdown("#### DATA HEALTH · DATA RELIABILITY MONITOR")
- st.write("Đây là bảng kiểm tra chất lượng và đường đi dữ liệu. Nó cho biết feed nào đang chạy, dữ liệu mới đến đâu, thành phần nào đã có và phần nào chưa được kết nối.")
- agev=float(age) if age is not None else 99999
- status_color="success" if feed=="FRESH" and agev<=120 else ("warning" if agev<=300 else "error")
- c1,c2,c3=st.columns(3);c1.metric("SPOT SOURCE STATUS",feed);c2.metric("SPOT AGE",f"{age}s" if age is not None else "Unknown");c3.metric("VALID OHLC BARS",f"{len(df):,}")
- if status_color=="success":st.success("SPOT REFERENCE: FRESH — nguồn báo giá tham chiếu mới. Đây không phải xác nhận broker feed.")
- elif status_color=="warning":st.warning("SPOT REFERENCE: DELAYED — dữ liệu có thể đã trễ.")
- else:st.error("SPOT REFERENCE: UNAVAILABLE / UNVERIFIED.")
- items=[
- ("XAUS spot reference","Giá spot tham chiếu và timestamp","CONNECTED" if spot else "FAILED"),
- ("XAUS OHLC endpoint","Nến theo timeframe đang chọn","CONNECTED" if len(df) else "FAILED"),
- ("Candle validation","Timestamp, OHLC numeric, duplicate removal","BASIC"),
- ("Minute collector","Thu thập nền mỗi phút khi dashboard đóng","NOT BUILT"),
- ("Persistent database","Kho lịch sử độc lập Streamlit","NOT BUILT"),
- ("Backup OHLC provider","Nguồn OHLC dự phòng đã xác thực","NOT CONNECTED"),
- ("Broker bid/ask feed","Giá có thể thực thi và spread","NOT CONNECTED")]
- for title,desc,status in items:
-  aa,bb,cc=st.columns([2,4,1.3]);aa.markdown(f"**{title}**");bb.caption(desc)
-  if status=="CONNECTED":cc.success(status)
-  elif status=="BASIC":cc.info(status)
-  else:cc.warning(status)
- st.markdown("#### SOURCE TIMESTAMPS")
- st.json({"spot_state":feed,"spot_age_seconds":age,"spot_as_of":state.get("as_of") or state.get("updated_at"),"ohlc_source":"XAUS chart endpoint","last_bar_utc":str(df.dt.iloc[-1]) if len(df) else None,"timeframe":tf,"history":period})
- with st.expander("Raw API response"):st.json(raw if isinstance(raw,dict) else {})
- st.info("Quan trọng: ứng dụng hiện fetch khi trang được tải hoặc tương tác. Chưa có dịch vụ thu thập dữ liệu chạy độc lập mỗi phút. FRESH chỉ phản ánh trạng thái spot do XAUS trả về.")
-st.caption("M.A.R.S. GOLD PRO V2.4 · Visual quant prototype · Indicative spot is not broker execution price.")
+    spot_obj, spot_price, daily, intra = load_public_data()
+except Exception as e:
+    feed_error = str(e)
+
+if feed_error:
+    data_state = "DATA ERROR"
+    price_asof = "Unavailable"
+else:
+    ds = spot_obj.get("data_state", {}) or {}
+    data_state = "STALE" if spot_obj.get("stale") else str(ds.get("status","UNKNOWN")).upper()
+    price_asof = spot_obj.get("price_as_of") or ds.get("as_of") or spot_obj.get("updated_at") or "—"
+
+# Upload broker data on sidebar
+with st.sidebar:
+    st.markdown("**BROKER OHLC IMPORT**")
+    st.caption("CSV chuẩn cho H4 / H1 / M15. Giữ cùng một nguồn giá.")
+    uploads = {}
+    parsed = {}
+    statuses = {}
+    for tf in ["H4","H1","M15"]:
+        uploads[tf] = st.file_uploader(f"{tf} · CSV", type=["csv"], key=f"upload_{tf}")
+        parsed[tf], statuses[tf] = normalize_csv(uploads[tf], tf)
+    st.caption("Cần dữ liệu broker thật để xác nhận setup. Không tự tạo nến intraday.")
+
+# Header / top strip
+st.markdown('<div class="mars-eyebrow">M.A.R.S. · MULTI-TIMEFRAME GOLD INTELLIGENCE</div>', unsafe_allow_html=True)
+st.title("Gold Command Center")
+st.markdown('<div class="mars-sub">Institutional-style research workspace · XAU/USD · USD per troy ounce</div>', unsafe_allow_html=True)
+k1,k2,k3,k4=st.columns(4)
+with k1: card("SPOT REFERENCE", fmt_price(spot_price), "XAUS public indicative spot", C["gold"])
+with k2: card("FEED STATE", data_state, f"As of {str(price_asof)[:19]}", C["green"] if data_state in ["LIVE","OK","FRESH"] else C["amber"])
+with k3: card("DAILY HISTORY", f"{len(daily):,} bars" if len(daily) else "Unavailable", "Provider daily history · not intraday")
+with k4:
+    ready_count=sum(parsed[t] is not None and len(parsed[t])>=80 for t in ["H4","H1","M15"])
+    card("MTF VALIDATION", f"{ready_count}/3 TF", "Broker CSV · H4 / H1 / M15", C["green"] if ready_count==3 else C["amber"])
+
+if feed_error:
+    st.error(f"Không kết nối được XAUS public API: {feed_error}. Dashboard không thay bằng giá giả.")
+if data_state == "STALE":
+    st.warning("Nguồn XAUS đang đánh dấu dữ liệu STALE. Không xem đây là feed LIVE.")
+
+# ---------------- PAGE 1 ----------------
+if page.startswith("01"):
+    st.markdown("### <span class='mars-section'>01 / MARKET STRUCTURE</span>", unsafe_allow_html=True)
+    st.markdown("#### Market Analysis")
+    tf_choice=st.segmented_control("TIMEFRAME",["H4","H1","M15","DAILY"],default="H4")
+    if tf_choice=="DAILY":
+        if len(daily):
+            d=daily_history_candles(daily).tail(220)
+            fig=go.Figure(go.Candlestick(x=d.date,open=d.open_rebuilt,high=d.high,low=d.low,close=d.close,
+                increasing_line_color=C["green"],decreasing_line_color=C["red"],name="XAUS Daily"))
+            fig.add_trace(go.Scatter(x=d.date,y=ema(d.close,20),name="EMA20",line=dict(color=C["gold"],width=1.5)))
+            fig.add_trace(go.Scatter(x=d.date,y=ema(d.close,50),name="EMA50",line=dict(color=C["blue"],width=1.5)))
+            fig.update_layout(title="XAU/USD · Daily provider history",height=560,xaxis_rangeslider_visible=False)
+            plotly_chart(fig)
+            st.caption("Lưu ý: nếu provider không trả Open, Open được dựng từ previous close. Đây không phải broker execution candle.")
+        else: st.info("Daily history chưa khả dụng.")
+    elif parsed.get(tf_choice) is not None and len(parsed[tf_choice])>=80:
+        df=parsed[tf_choice]
+        plotly_chart(candle_fig(df.tail(500),f"Broker OHLC · {tf_choice}"),height=590)
+        a=analyze_tf(df)
+        a1,a2,a3,a4=st.columns(4)
+        with a1: card("DIRECTIONAL BIAS",a["bias"],"EMA20 / EMA50")
+        with a2: card("LAST CLOSE",fmt_price(a["last"]),"Uploaded broker feed")
+        with a3: card("SUPPORT · 80 BARS",fmt_price(a["support"]),"Rolling low")
+        with a4: card("RESISTANCE · 80 BARS",fmt_price(a["resistance"]),"Rolling high")
+    else:
+        st.info(f"Chưa có dữ liệu OHLC broker hợp lệ cho {tf_choice}. Tải CSV H4/H1/M15 ở sidebar. XAUS chỉ cấp daily history và spot reference trong build này.")
+        if len(daily):
+            st.markdown("**Daily context (không thay thế H4/H1/M15)**")
+            d=daily_history_candles(daily).tail(120)
+            fig=go.Figure(go.Candlestick(x=d.date,open=d.open_rebuilt,high=d.high,low=d.low,close=d.close,
+                increasing_line_color=C["green"],decreasing_line_color=C["red"]))
+            fig.update_layout(title="XAUS daily history · context only",height=420,xaxis_rangeslider_visible=False)
+            plotly_chart(fig)
+    st.markdown("#### Market structure checklist")
+    cols=st.columns(4)
+    checks=[("Major S/R","Requires broker OHLC"),("H4 directional bias","Requires H4 CSV"),("H1 reaction","Requires H1 CSV"),("M15 entry structure","Requires M15 CSV")]
+    for col,(name,desc) in zip(cols,checks):
+        with col: card(name,"PENDING",desc,C["amber"])
+    st.markdown('<div class="mars-note">Không hiển thị volume giả cho spot XAU/USD. Nếu dùng volume COMEX futures, phải ghi rõ đó là futures volume, không phải spot volume.</div>',unsafe_allow_html=True)
+
+# ---------------- PAGE 2 ----------------
+elif page.startswith("02"):
+    st.markdown("### <span class='mars-section'>02 / SCENARIO DISTRIBUTION</span>", unsafe_allow_html=True)
+    st.markdown("#### Probability Zones")
+    st.caption("Các dải dưới đây là phân vị lịch sử của biến động daily, KHÔNG phải xác suất dự báo đã hiệu chỉnh.")
+    if len(daily)>=35 and spot_price:
+        close=daily["c"].dropna().astype(float).values
+        rets=pd.Series(close).pct_change().dropna()
+        horizons={"1D":1,"3D":3,"5D":5,"10D":10}
+        rows=[]
+        for label,n in horizons.items():
+            roll=(1+rets).rolling(n).apply(np.prod,raw=True)-1
+            roll=roll.dropna()
+            if len(roll)<20: continue
+            q10,q25,q50,q75,q90=np.quantile(roll,[.10,.25,.50,.75,.90])
+            rows.append({"Horizon":label,"P10":spot_price*(1+q10),"P25":spot_price*(1+q25),
+                         "Median":spot_price*(1+q50),"P75":spot_price*(1+q75),"P90":spot_price*(1+q90),
+                         "Samples":len(roll)})
+        bands=pd.DataFrame(rows)
+        if not bands.empty:
+            fig=go.Figure()
+            fig.add_trace(go.Scatter(x=bands.Horizon,y=bands.P90,mode="lines",line=dict(width=0),showlegend=False))
+            fig.add_trace(go.Scatter(x=bands.Horizon,y=bands.P10,mode="lines",fill="tonexty",
+                fillcolor="rgba(49,193,142,.13)",line=dict(width=0),name="P10–P90 historical envelope"))
+            fig.add_trace(go.Scatter(x=bands.Horizon,y=bands.P75,mode="lines",line=dict(color=C["green"],dash="dot"),name="P75"))
+            fig.add_trace(go.Scatter(x=bands.Horizon,y=bands.P50,mode="lines+markers",line=dict(color=C["gold"],width=2),name="Median"))
+            fig.add_trace(go.Scatter(x=bands.Horizon,y=bands.P25,mode="lines",line=dict(color=C["red"],dash="dot"),name="P25"))
+            fig.add_hline(y=spot_price,line_dash="dash",line_color="#FFFFFF",annotation_text="Spot reference")
+            fig.update_layout(title="Historical forward-return quantiles · USD/oz",height=440,yaxis_tickprefix="$")
+            plotly_chart(fig)
+            display=bands.copy()
+            for c in ["P10","P25","Median","P75","P90"]: display[c]=display[c].map(lambda x:f"${x:,.2f}")
+            st.dataframe(display,use_container_width=True,hide_index=True)
+            st.caption("Phương pháp: rolling compounded daily returns, empirical quantiles. Đây là dải biến động lịch sử; chưa có calibration, walk-forward hoặc xác suất chạm vùng.")
+        else: st.warning("Chưa đủ mẫu cho các horizon.")
+    else:
+        st.info("Cần ít nhất 35 daily bars hợp lệ và spot reference để tính dải lịch sử.")
+    st.markdown("#### What is required before publishing true probabilities")
+    req=st.columns(3)
+    with req[0]: card("DATA","Consistent OHLC","H4 / H1 / M15 + timezone")
+    with req[1]: card("MODEL","Walk-forward","Out-of-sample validation")
+    with req[2]: card("CALIBRATION","Brier / reliability","Probability quality by horizon")
+
+# ---------------- PAGE 3 ----------------
+elif page.startswith("03"):
+    st.markdown("### <span class='mars-section'>03 / VOLATILITY LANDSCAPE</span>", unsafe_allow_html=True)
+    st.markdown("#### 3D Forecast")
+    st.caption("3D surface hiện biểu diễn envelope biến động lịch sử theo horizon và sigma. Chưa phải forecast ML hay calibrated probability surface.")
+    if len(daily)>=35 and spot_price:
+        close=daily["c"].dropna().astype(float)
+        rets=close.pct_change().dropna()
+        vol=float(rets.tail(60).std())
+        days=np.array([1,2,3,5,7,10,14,21])
+        sigmas=np.array([-2,-1.5,-1,-.5,0,.5,1,1.5,2])
+        X,Y=np.meshgrid(days,sigmas)
+        Z=spot_price*np.exp(Y*vol*np.sqrt(X))
+        fig=go.Figure(data=[go.Surface(x=X,y=Y,z=Z,colorscale=[
+            [0,"#EF6B7B"],[.25,"#9B637A"],[.5,"#E4B85B"],[.75,"#4E9C91"],[1,"#31C18E"]],
+            colorbar=dict(title="USD/oz"),hovertemplate="Horizon: %{x} days<br>σ: %{y:.1f}<br>Price: $%{z:,.2f}<extra></extra>")])
+        fig.update_layout(height=650,scene=dict(
+            xaxis_title="Forward horizon · days",yaxis_title="Volatility band · σ",
+            zaxis_title="Illustrative price · USD/oz",
+            bgcolor="rgba(0,0,0,0)",camera=dict(eye=dict(x=1.55,y=1.6,z=1.05))),
+            margin=dict(l=0,r=0,t=35,b=0))
+        st.plotly_chart(fig,use_container_width=True,config={"displaylogo":False,"scrollZoom":True})
+        horizon=st.select_slider("HORIZON",options=["1D","2D","3D","5D","7D","10D","14D","21D"],value="7D")
+        n=int(horizon.replace("D",""))
+        q10,q50,q90=np.exp(np.array([-1.2816,0,1.2816])*vol*np.sqrt(n))*spot_price
+        c1,c2,c3=st.columns(3)
+        with c1: card("LOWER ENVELOPE · ~P10",fmt_price(q10),"Normal approximation; not calibrated",C["red"])
+        with c2: card("CENTRAL REFERENCE",fmt_price(q50),"Current spot carried forward",C["gold"])
+        with c3: card("UPPER ENVELOPE · ~P90",fmt_price(q90),"Normal approximation; not calibrated",C["green"])
+        st.markdown('<div class="mars-note">P10/P90 labels above are mathematical normal-approximation quantiles based on recent realized daily volatility, not validated hit probabilities. Treat as scenario envelope only.</div>',unsafe_allow_html=True)
+    else:
+        st.info("Cần daily history đủ dài để ước lượng realized volatility. Không tạo bề mặt 3D bằng dữ liệu giả.")
+
+# ---------------- PAGE 4 ----------------
+elif page.startswith("04"):
+    st.markdown("### <span class='mars-section'>04 / DECISION GATES</span>", unsafe_allow_html=True)
+    st.markdown("#### Trade Intelligence")
+    st.markdown('<div class="mars-note">Trạng thái mặc định là NO TRADE. Chỉ xem xét tín hiệu khi đủ dữ liệu OHLC đồng nhất cho H4/H1/M15; logic này chưa được backtest walk-forward nên không tự phát BUY/SELL.</div>',unsafe_allow_html=True)
+    analyses={tf:analyze_tf(parsed.get(tf)) for tf in ["H4","H1","M15"]}
+    all_ready=all(analyses[t]["ready"] for t in analyses)
+    for tf in ["H4","H1","M15"]:
+        a=analyses[tf]
+        if a["ready"]:
+            st.write(f"**{tf}** · {a['bias']} · Close {fmt_price(a['last'])} · EMA20 {fmt_price(a['ema20'])} · EMA50 {fmt_price(a['ema50'])}")
+        else:
+            st.write(f"**{tf}** · NOT VERIFIED — cần ít nhất 80 nến CSV hợp lệ.")
+    h4=analyses["H4"]; h1=analyses["H1"]; m15=analyses["M15"]
+    direction_ok=all_ready and h4["bias"] in ["BULLISH","BEARISH"] and h1["bias"]==h4["bias"] and m15["bias"]==h4["bias"]
+    gates=[
+        ("01","Major S/R mapping",all_ready,"Needs consistent broker OHLC"),
+        ("02","H4 directional bias",h4["ready"],h4.get("bias","Not verified")),
+        ("03","H1 reaction & structure",h1["ready"],h1.get("bias","Not verified")),
+        ("04","M15 momentum / entry structure",m15["ready"],m15.get("bias","Not verified")),
+        ("05","Directional alignment",direction_ok,"H4 / H1 / M15 same EMA regime"),
+        ("06","R:R ≥ 1:2 + sizing",False,"Not released — no validated entry/SL model"),
+    ]
+    for num,name,ok,detail in gates:
+        col1,col2=st.columns([2,3])
+        with col1: st.write(f"**{num} · {name}**")
+        with col2:
+            st.markdown(f"<span style='color:{C['green'] if ok else C['amber']};font-weight:800'>{'PASS' if ok else 'BLOCKED'}</span> · <span style='color:{C['muted']}'>{detail}</span>",unsafe_allow_html=True)
+    st.divider()
+    decision="NO TRADE"
+    st.markdown(f"<div class='mars-card'><div class='mars-k'>M.A.R.S. DECISION</div><div class='mars-v' style='color:{C['amber']};font-size:34px'>{decision}</div><div class='mars-hint'>Trade execution remains locked until independent backtest, entry/SL rules and position sizing are validated.</div></div>",unsafe_allow_html=True)
+    st.markdown("#### Trade plan")
+    p1,p2,p3,p4=st.columns(4)
+    with p1: card("ENTRY","—","Not authorized")
+    with p2: card("STOP LOSS","—","Structural stop unavailable")
+    with p3: card("TAKE PROFIT 1","—","Not calculated")
+    with p4: card("TAKE PROFIT 2","—","Not calculated")
+    st.caption("Không dùng giá spot XAUS làm giá khớp lệnh. Giá thực thi phải lấy từ broker đang giao dịch.")
+
+# ---------------- PAGE 5 ----------------
+else:
+    st.markdown("### <span class='mars-section'>05 / SOURCE & PIPELINE MONITOR</span>", unsafe_allow_html=True)
+    st.markdown("#### Data Health")
+    if feed_error:
+        st.error(f"XAUS API: ERROR · {feed_error}")
+    else:
+        st.success(f"XAUS API reachable · state={data_state}")
+    rows=[
+        {"Component":"XAUS spot reference","Role":"Indicative spot snapshot","State":"ERROR" if feed_error else data_state,"Coverage":str(price_asof)},
+        {"Component":"XAUS daily history","Role":"Daily OHLC context","State":"ERROR" if feed_error or daily.empty else "LOADED","Coverage":f"{len(daily)} bars"},
+        {"Component":"XAUS intraday sampled","Role":"Reference line only","State":"ERROR" if feed_error else ("LOADED" if len(intra) else "EMPTY"),"Coverage":f"{len(intra)} points"},
+    ]
+    for tf in ["H4","H1","M15"]:
+        df=parsed.get(tf)
+        rows.append({"Component":f"Broker {tf} OHLC","Role":"Structure / trade analysis","State":"LOADED" if df is not None and len(df)>=80 else "NOT LOADED / INVALID","Coverage":statuses.get(tf,"No file")})
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.markdown("#### Data quality controls")
+    quality=[
+        ("Timestamp normalization","UTC parse + sorting + duplicate removal"),
+        ("OHLC integrity","High ≥ Open/Close; Low ≤ Open/Close"),
+        ("Minimum sample","80 candles for provisional EMA regime; 500+ preferred"),
+        ("Feed consistency","H4/H1/M15 must come from the same broker/provider"),
+        ("Volume integrity","Spot volume not fabricated; futures volume labelled separately"),
+        ("Probability governance","Walk-forward + Brier score + reliability curve required"),
+    ]
+    for name,desc in quality:
+        st.write(f"**{name}** — {desc}")
+    st.markdown("#### Data source register")
+    st.markdown("- [XAUS public API](https://xaus.com/) — indicative spot and daily/intraday reference data.\n- [Dukascopy historical data](https://www.dukascopy.com/swiss/english/marketwatch/historical/) — candidate source for deep history; not yet connected in this build.\n- Broker OHLC CSV — use the same execution provider for H4/H1/M15.")
+    st.markdown('<div class="mars-note">Data Health is intentionally transparent: “not loaded” is not treated as “live”. The app never fills missing OHLC with invented prices and never converts a public spot snapshot into an executable quote.</div>',unsafe_allow_html=True)
+
+st.divider()
+st.caption(f"M.A.R.S. GOLD PRO · Streamlit rebuild · Last UI render: {datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC · Research / decision support only · No auto-trading.")
