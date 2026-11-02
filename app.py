@@ -146,55 +146,56 @@ with tabs[2]:
   st.plotly_chart(dark(fig3,650),use_container_width=True,config={"displaylogo":False,"scrollZoom":True})
   st.caption("Mật độ được ước lượng từ phân phối mô phỏng tại từng chân trời. Đỉnh cao là vùng tập trung tương đối, không phải xác suất chạm giá.")
 
-  # Fan chart: quantile bands at each horizon.
+  # PART 2 · Explicit forecast corridor
+  st.markdown("### 02 / FORECAST CORRIDOR · DẢI GIÁ DỰ BÁO")
+  st.caption("Dải ngoài P05–P95 chứa 90% kết quả mô phỏng; dải trong P25–P75 chứa 50%; đường vàng là P50.")
   q05,q25,q50,q75,q95=qq[0],qq[2],qq[3],qq[4],qq[6]
   fan=go.Figure()
-  fan.add_trace(go.Scatter(x=hs,y=q95,mode="lines",line=dict(width=0),showlegend=False,hoverinfo="skip"))
-  fan.add_trace(go.Scatter(x=hs,y=q05,mode="lines",line=dict(width=0),fill="tonexty",fillcolor="rgba(76,142,220,.15)",name="P05–P95 (90%)"))
-  fan.add_trace(go.Scatter(x=hs,y=q75,mode="lines",line=dict(width=0),showlegend=False,hoverinfo="skip"))
-  fan.add_trace(go.Scatter(x=hs,y=q25,mode="lines",line=dict(width=0),fill="tonexty",fillcolor="rgba(40,190,160,.22)",name="P25–P75 (50%)"))
-  fan.add_trace(go.Scatter(x=hs,y=q50,mode="lines+markers",line=dict(color="#f1c75b",width=3),marker=dict(size=6),name="P50 · Median"))
-  fan.add_hline(y=spot0,line_dash="dot",line_color="#9aaac0",annotation_text="Current reference",annotation_position="bottom right")
-  fan.update_layout(title="FORECAST FAN · QUANTILE PRICE BANDS",xaxis_title="Hours forward",yaxis_title="XAU/USD · USD/oz",hovermode="x unified",legend=dict(orientation="h",y=1.15))
-  st.plotly_chart(dark(fan,390),use_container_width=True,config={"displaylogo":False})
+  fan.add_trace(go.Scatter(x=hs,y=q95,mode="lines",line=dict(color="#579ce8",width=1.5),name="P95 · Upper 90%"))
+  fan.add_trace(go.Scatter(x=hs,y=q05,mode="lines",line=dict(color="#579ce8",width=1.5),fill="tonexty",fillcolor="rgba(75,145,225,.22)",name="P05 · Lower 90%"))
+  fan.add_trace(go.Scatter(x=hs,y=q75,mode="lines",line=dict(color="#29cbaa",width=1.5),name="P75 · Upper 50%"))
+  fan.add_trace(go.Scatter(x=hs,y=q25,mode="lines",line=dict(color="#29cbaa",width=1.5),fill="tonexty",fillcolor="rgba(41,203,170,.25)",name="P25 · Lower 50%"))
+  fan.add_trace(go.Scatter(x=hs,y=q50,mode="lines+markers",line=dict(color="#ffd36b",width=4),marker=dict(size=9),name="P50 · Median"))
+  fan.add_hline(y=spot0,line_dash="dash",line_color="white",annotation_text=f"SPOT ${spot0:,.2f}")
+  fan.update_layout(title="XAU/USD · FORECAST PRICE CORRIDOR",xaxis=dict(title="Forecast horizon",tickmode="array",tickvals=hs,ticktext=["4H","8H","12H","24H","2D","3D","5D","7D"]),yaxis=dict(title="Price USD/oz",tickprefix="$",tickformat=",.0f"),hovermode="x unified",legend=dict(orientation="h",y=1.18),margin=dict(t=90,b=55))
+  st.plotly_chart(dark(fan,470),use_container_width=True,config={"displaylogo":False,"scrollZoom":True})
+  st.markdown("**Cách đọc:** vùng xanh dương = biên 90%; vùng xanh ngọc = vùng giữa 50%; đường vàng = trung vị. Khoảng cách giữa hai biên càng lớn, độ bất định càng cao.")
 
-  # Density heatmap uses the same bins and probabilities as the 3D surface.
-  heat=go.Figure(go.Heatmap(
-   x=hs,y=yy,z=dens,colorscale=[
-    [0.00,"#30206d"],[0.18,"#2857a5"],[0.38,"#168fc1"],
-    [0.58,"#22c9b5"],[0.76,"#a8dc42"],[0.90,"#ffc247"],[1.00,"#e84b35"]],
-   zmin=0,zmax=zmax,colorbar=dict(title="Density"),
-   hovertemplate="Horizon: %{x:.0f}h<br>Price: $%{y:,.2f}<br>Density: %{z:.5f}<extra></extra>"
-  ))
+  # Heatmap retained
+  heat=go.Figure(go.Heatmap(x=hs,y=yy,z=dens,colorscale=[[0.00,"#30206d"],[0.18,"#2857a5"],[0.38,"#168fc1"],[0.58,"#22c9b5"],[0.76,"#a8dc42"],[0.90,"#ffc247"],[1.00,"#e84b35"]],zmin=0,zmax=zmax,colorbar=dict(title="Density"),hovertemplate="Horizon: %{x:.0f}h<br>Price: $%{y:,.2f}<br>Density: %{z:.5f}<extra></extra>"))
   heat.add_hline(y=spot0,line_dash="dot",line_color="#f4d06f",annotation_text="Current reference")
   heat.update_layout(title="PROBABILITY HEATMAP · PRICE CONCENTRATION",xaxis_title="Hours forward",yaxis_title="Price (USD/oz)",yaxis=dict(tickprefix="$"))
   st.plotly_chart(dark(heat,410),use_container_width=True,config={"displaylogo":False})
 
-  # Horizon selector and explicit statistical interpretation.
+  # PART 4 · Clear horizon statistics
+  st.markdown("### 04 / FORECAST STATISTICS · XÁC SUẤT THEO THỜI HẠN")
   horizon_labels={4:"4H",8:"8H",12:"12H",24:"24H",48:"2D",72:"3D",120:"5D",168:"7D"}
-  selected=st.select_slider("FORECAST HORIZON",options=list(hs),value=24,format_func=lambda x:horizon_labels[int(x)])
+  selected=st.select_slider("CHỌN THỜI HẠN",options=list(hs),value=24,format_func=lambda x:horizon_labels[int(x)])
   j=int(np.where(hs==selected)[0][0]);sample=paths[:,j]
-  p_up=float(np.mean(sample>spot0));p_down=float(np.mean(sample<spot0))
-  p_flat=float(max(0,1-p_up-p_down))
-  k1,k2,k3,k4=st.columns(4)
-  k1.metric("P50 · MEDIAN",f"${qq[3,j]:,.2f}",f"{qq[3,j]-spot0:+,.2f} vs ref")
-  k2.metric("90% INTERVAL",f"${qq[0,j]:,.0f} – ${qq[6,j]:,.0f}")
-  k3.metric("P(UP)",f"{p_up*100:.1f}%")
-  k4.metric("P(DOWN)",f"{p_down*100:.1f}%")
-  st.markdown("#### FORECAST DISTRIBUTION BY HORIZON")
+  p_up=float(np.mean(sample>spot0));p_down=float(np.mean(sample<spot0));p_flat=max(0.0,1-p_up-p_down)
+  med=float(np.quantile(sample,.50));lo90=float(np.quantile(sample,.05));hi90=float(np.quantile(sample,.95))
+  lo50=float(np.quantile(sample,.25));hi50=float(np.quantile(sample,.75))
+  cards=[
+   ("P50 · MEDIAN",f"${med:,.2f}",f"{med-spot0:+,.2f} vs spot","#ffd36b"),
+   ("90% RANGE · P05–P95",f"${lo90:,.0f} – ${hi90:,.0f}","90% simulated outcomes","#70b5ff"),
+   ("P(UP)",f"{p_up*100:.1f}%","Scenarios ending above spot","#36d6a6"),
+   ("P(DOWN)",f"{p_down*100:.1f}%","Scenarios ending below spot","#f0808c")]
+  html='<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">'
+  for label,value,sub,color in cards:
+   html+=f'<div style="background:linear-gradient(145deg,#14263d,#0b1625);border:1px solid #304864;border-radius:12px;padding:14px;min-height:105px"><div style="font-size:10px;color:#9db1ca;font-weight:750">{label}</div><div style="font-size:22px;font-weight:850;color:{color};margin:8px 0 4px">{value}</div><div style="font-size:10px;color:#9aacc2">{sub}</div></div>'
+  html+='</div>'
+  st.markdown(html,unsafe_allow_html=True)
+  st.markdown(f"""<div style="background:#0d1929;border:1px solid #2b4059;border-radius:11px;padding:13px;margin:12px 0">
+  <b style="font-size:11px">SCENARIO MIX · {horizon_labels[int(selected)]}</b>
+  <div style="display:flex;height:17px;border-radius:8px;overflow:hidden;margin:10px 0">
+  <div style="width:{p_up*100:.3f}%;background:#26c99b"></div><div style="width:{p_flat*100:.3f}%;background:#e8bd58"></div><div style="width:{p_down*100:.3f}%;background:#e66e7d"></div></div>
+  <div style="display:flex;justify-content:space-between;font-size:11px;color:#bdcadd"><span>UP {p_up*100:.1f}%</span><span>FLAT {p_flat*100:.1f}%</span><span>DOWN {p_down*100:.1f}%</span></div></div>""",unsafe_allow_html=True)
+  st.markdown(f"**Vùng giữa 50%:** `${lo50:,.2f} – ${hi50:,.2f}` &nbsp; | &nbsp; **Vùng 90%:** `${lo90:,.2f} – ${hi90:,.2f}`")
+  st.markdown("#### SO SÁNH CÁC THỜI HẠN")
   rows=[]
   for ix,h in enumerate(hs):
    arr=paths[:,ix]
-   rows.append({
-    "Horizon":horizon_labels[int(h)],
-    "P05":f"${np.quantile(arr,.05):,.2f}",
-    "P25":f"${np.quantile(arr,.25):,.2f}",
-    "P50":f"${np.quantile(arr,.50):,.2f}",
-    "P75":f"${np.quantile(arr,.75):,.2f}",
-    "P95":f"${np.quantile(arr,.95):,.2f}",
-    "P(UP)":f"{np.mean(arr>spot0)*100:.1f}%",
-    "P(DOWN)":f"{np.mean(arr<spot0)*100:.1f}%"
-   })
+   rows.append({"Horizon":horizon_labels[int(h)],"P05":f"${np.quantile(arr,.05):,.2f}","P25":f"${np.quantile(arr,.25):,.2f}","P50":f"${np.quantile(arr,.50):,.2f}","P75":f"${np.quantile(arr,.75):,.2f}","P95":f"${np.quantile(arr,.95):,.2f}","P(UP)":f"{np.mean(arr>spot0)*100:.1f}%","P(DOWN)":f"{np.mean(arr<spot0)*100:.1f}%"})
   st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
   st.info(f"MODEL STATUS: EXPERIMENTAL · Volatility input {v*100:.4f}% per bar · {len(paths):,} simulated scenarios. Quantiles and directional frequencies are simulation outputs, not calibrated real-world probabilities.")
   st.caption("P05–P95 chứa 90% kết quả mô phỏng tại từng thời hạn; không có nghĩa giá chắc chắn đi qua toàn bộ vùng. Mô hình hiện chưa có walk-forward calibration/Brier score, vì vậy chỉ dùng tham khảo, không phát tín hiệu giao dịch.")

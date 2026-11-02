@@ -3,3 +3,6 @@ More visual panels: probability fan chart, quantile bands, price-density heatmap
 
 
 Module 03 enhancement: 3D density surface, quantile fan chart, density heatmap, horizon statistics and explicit experimental-model labeling. Existing data ingestion, API endpoints, simulation function and other modules retained.
+
+
+V2: improved fan corridor and statistics cards/scenario bar. Data pipeline, simulation engine and other modules preserved.
