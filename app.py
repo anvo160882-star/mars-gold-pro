@@ -7,23 +7,14 @@ from plotly.subplots import make_subplots
 
 st.set_page_config(page_title="M.A.R.S. GOLD PRO V2.4",page_icon="✦",layout="wide")
 st.markdown("""<style>
-.block-container{max-width:1850px;padding:1.05rem 1.45rem 2rem}
-[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background:radial-gradient(ellipse at 50% -18%,#14243a 0%,#070d17 54%)}
-[data-testid="stMetric"]{background:linear-gradient(145deg,rgba(20,36,57,.96),rgba(9,18,31,.98));border:1px solid #2a405d;border-radius:12px;padding:13px 15px;box-shadow:0 7px 22px rgba(0,0,0,.16);min-height:92px}
-[data-testid="stMetricLabel"]{color:#91a8c5;font-size:10px;text-transform:uppercase;letter-spacing:.11em}
-[data-testid="stMetricValue"]{font-size:24px;color:#f2f6fc;font-weight:700}
-[data-testid="stMetricDelta"]{font-size:11px}
-.stTabs [data-baseweb="tab-list"]{gap:8px;border-bottom:1px solid #263b55;padding:0 0 7px}
-.stTabs [data-baseweb="tab"]{font-size:11px;font-weight:650;letter-spacing:.035em;color:#9aabc2;background:#0d1929;border:1px solid #20344d;border-radius:8px 8px 5px 5px;padding:9px 13px}
-.stTabs [aria-selected="true"]{color:#f4d27d!important;background:linear-gradient(180deg,#26354a,#142236)!important;border-color:#806b3d!important}
-div[data-testid="stAlert"]{border-radius:10px;border:1px solid #2b4059}
-div[data-testid="stPlotlyChart"]{background:linear-gradient(145deg,rgba(15,27,43,.65),rgba(8,16,28,.55));border:1px solid rgba(48,69,96,.62);border-radius:12px;padding:5px 7px 0}
-div[data-testid="stSelectbox"] label,div[data-testid="stToggle"] label{color:#a8bad1;font-size:11px;font-weight:650;letter-spacing:.06em}
-h1,h2,h3,h4{letter-spacing:.01em}
-hr{border-color:#263b55}
-small,.stCaption{color:#91a3bc}
-button[kind="secondary"]{border:1px solid #314967}
-@media(max-width:800px){.block-container{padding:.7rem .7rem 1.5rem}[data-testid="stMetricValue"]{font-size:19px}.stTabs [data-baseweb="tab"]{padding:7px 8px;font-size:10px}}
+.block-container{max-width:1850px;padding:1rem 1.35rem}
+[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background:#070d17}
+[data-testid="stMetric"]{background:linear-gradient(145deg,#101d30,#0b1422);border:1px solid #233751;border-radius:10px;padding:12px}
+[data-testid="stMetricLabel"]{color:#91a3bc;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+[data-testid="stMetricValue"]{font-size:23px;color:#edf4ff}
+.stTabs [data-baseweb="tab-list"]{gap:20px}
+.stTabs [data-baseweb="tab"]{font-size:12px;color:#9aabc2}
+div[data-testid="stAlert"]{border-radius:10px}
 </style>""",unsafe_allow_html=True)
 API="https://xaus.com/api/v1"; H={"User-Agent":"MARS-GOLD-PRO-V2.4","Accept":"application/json"}
 
@@ -52,12 +43,8 @@ def sim(df):
 
 def dark(fig,height=480):
  fig.update_layout(template="plotly_dark",height=height,paper_bgcolor="#070d17",plot_bgcolor="#0b1422",
-  font=dict(color="#d0dced",family="Inter, Arial",size=12),
-  margin=dict(l=34,r=28,t=62,b=34),
-  legend=dict(orientation="h",y=1.13,x=0,font=dict(size=10)),
-  hovermode="x unified",
-  title=dict(font=dict(size=15,color="#edf4ff"),x=0.015,xanchor="left"),
-  hoverlabel=dict(bgcolor="#14243a",bordercolor="#48617f",font=dict(color="#f4f7fb",size=11)))
+  font=dict(color="#c5d2e4",family="Arial"),margin=dict(l=24,r=24,t=58,b=24),
+  legend=dict(orientation="h",y=1.12,x=0),hovermode="x unified")
  fig.update_xaxes(gridcolor="#1b2b40",zerolinecolor="#1b2b40")
  fig.update_yaxes(gridcolor="#1b2b40",zerolinecolor="#1b2b40")
  return fig
@@ -126,16 +113,93 @@ with tabs[1]:
   st.caption("Quantile envelopes and density map are generated from historical-return Monte Carlo simulations. They are not calibrated probabilities or validated forecasts.")
  else:st.warning("Need more valid OHLC bars.")
 with tabs[2]:
- st.markdown("#### 3D FORECAST · PRICE DENSITY SURFACE")
+ st.markdown("#### 3D FORECAST · QUANT PROBABILITY WORKSPACE")
  if len(df)>30:
-  hs,qq,paths,v=sim(df);g=np.linspace(np.quantile(paths,.01),np.quantile(paths,.99),65)
+  hs,qq,paths,v=sim(df)
+  spot0=float(df.c.iloc[-1])
+  # Marginal density at each forecast horizon (same simulation sample as the 3D surface).
+  g=np.linspace(np.quantile(paths,.005),np.quantile(paths,.995),91)
   dens=np.array([np.histogram(paths[:,i],bins=g,density=True)[0] for i in range(len(hs))]).T
-  yy=(g[:-1]+g[1:])/2;X,Y=np.meshgrid(hs,yy)
-  fig=go.Figure(go.Surface(x=X,y=Y,z=dens,colorscale="Turbo",opacity=.96,contours={"z":{"show":True,"usecolormap":True,"project_z":True}},colorbar=dict(title="Density")))
-  fig.update_layout(title="Interactive 3D scenario density · 5,000 paths",scene=dict(xaxis_title="Hours forward",yaxis_title="Price USD/oz",zaxis_title="Probability density",camera=dict(eye=dict(x=1.7,y=1.6,z=1.2))),uirevision="mars3d")
-  st.plotly_chart(dark(fig,680),use_container_width=True)
-  st.caption(f"Historical volatility input: {v*100:.4f}% per bar · drag to rotate · scroll to zoom.")
- else:st.warning("Need more valid OHLC bars.")
+  yy=(g[:-1]+g[1:])/2
+  X,Y=np.meshgrid(hs,yy)
+  zmax=float(np.nanmax(dens)) if dens.size else 1.0
+  surf=go.Surface(
+   x=X,y=Y,z=dens,colorscale=[
+    [0.00,"#30206d"],[0.18,"#2857a5"],[0.38,"#168fc1"],
+    [0.58,"#22c9b5"],[0.76,"#a8dc42"],[0.90,"#ffc247"],[1.00,"#e84b35"]],
+   cmin=0,cmax=zmax,opacity=.98,
+   contours={"z":{"show":True,"usecolormap":True,"project_z":True,"highlightcolor":"#f5d77a","width":2}},
+   colorbar=dict(title=dict(text="Density",side="right"),thickness=14,len=.72),
+   hovertemplate="Horizon: %{x:.0f}h<br>Price: $%{y:,.2f}<br>Density: %{z:.5f}<extra></extra>"
+  )
+  fig3=go.Figure(surf)
+  fig3.update_layout(
+   title=dict(text="PRICE × TIME × PROBABILITY DENSITY",x=.02,xanchor="left",font=dict(size=15)),
+   scene=dict(
+    xaxis=dict(title="Hours forward",backgroundcolor="#0b1422",gridcolor="#30435b",zerolinecolor="#52647b",dtick=24),
+    yaxis=dict(title="Price (USD/oz)",backgroundcolor="#0b1422",gridcolor="#30435b",tickprefix="$"),
+    zaxis=dict(title="Density",backgroundcolor="#0b1422",gridcolor="#30435b",rangemode="tozero"),
+    camera=dict(eye=dict(x=1.65,y=1.55,z=1.12)),
+    aspectmode="manual",aspectratio=dict(x=1.55,y=1.2,z=.78)
+   ),uirevision="mars3d_quant"
+  )
+  st.plotly_chart(dark(fig3,650),use_container_width=True,config={"displaylogo":False,"scrollZoom":True})
+  st.caption("Mật độ được ước lượng từ phân phối mô phỏng tại từng chân trời. Đỉnh cao là vùng tập trung tương đối, không phải xác suất chạm giá.")
+
+  # Fan chart: quantile bands at each horizon.
+  q05,q25,q50,q75,q95=qq[0],qq[2],qq[3],qq[4],qq[6]
+  fan=go.Figure()
+  fan.add_trace(go.Scatter(x=hs,y=q95,mode="lines",line=dict(width=0),showlegend=False,hoverinfo="skip"))
+  fan.add_trace(go.Scatter(x=hs,y=q05,mode="lines",line=dict(width=0),fill="tonexty",fillcolor="rgba(76,142,220,.15)",name="P05–P95 (90%)"))
+  fan.add_trace(go.Scatter(x=hs,y=q75,mode="lines",line=dict(width=0),showlegend=False,hoverinfo="skip"))
+  fan.add_trace(go.Scatter(x=hs,y=q25,mode="lines",line=dict(width=0),fill="tonexty",fillcolor="rgba(40,190,160,.22)",name="P25–P75 (50%)"))
+  fan.add_trace(go.Scatter(x=hs,y=q50,mode="lines+markers",line=dict(color="#f1c75b",width=3),marker=dict(size=6),name="P50 · Median"))
+  fan.add_hline(y=spot0,line_dash="dot",line_color="#9aaac0",annotation_text="Current reference",annotation_position="bottom right")
+  fan.update_layout(title="FORECAST FAN · QUANTILE PRICE BANDS",xaxis_title="Hours forward",yaxis_title="XAU/USD · USD/oz",hovermode="x unified",legend=dict(orientation="h",y=1.15))
+  st.plotly_chart(dark(fan,390),use_container_width=True,config={"displaylogo":False})
+
+  # Density heatmap uses the same bins and probabilities as the 3D surface.
+  heat=go.Figure(go.Heatmap(
+   x=hs,y=yy,z=dens,colorscale=[
+    [0.00,"#30206d"],[0.18,"#2857a5"],[0.38,"#168fc1"],
+    [0.58,"#22c9b5"],[0.76,"#a8dc42"],[0.90,"#ffc247"],[1.00,"#e84b35"]],
+   zmin=0,zmax=zmax,colorbar=dict(title="Density"),
+   hovertemplate="Horizon: %{x:.0f}h<br>Price: $%{y:,.2f}<br>Density: %{z:.5f}<extra></extra>"
+  ))
+  heat.add_hline(y=spot0,line_dash="dot",line_color="#f4d06f",annotation_text="Current reference")
+  heat.update_layout(title="PROBABILITY HEATMAP · PRICE CONCENTRATION",xaxis_title="Hours forward",yaxis_title="Price (USD/oz)",yaxis=dict(tickprefix="$"))
+  st.plotly_chart(dark(heat,410),use_container_width=True,config={"displaylogo":False})
+
+  # Horizon selector and explicit statistical interpretation.
+  horizon_labels={4:"4H",8:"8H",12:"12H",24:"24H",48:"2D",72:"3D",120:"5D",168:"7D"}
+  selected=st.select_slider("FORECAST HORIZON",options=list(hs),value=24,format_func=lambda x:horizon_labels[int(x)])
+  j=int(np.where(hs==selected)[0][0]);sample=paths[:,j]
+  p_up=float(np.mean(sample>spot0));p_down=float(np.mean(sample<spot0))
+  p_flat=float(max(0,1-p_up-p_down))
+  k1,k2,k3,k4=st.columns(4)
+  k1.metric("P50 · MEDIAN",f"${qq[3,j]:,.2f}",f"{qq[3,j]-spot0:+,.2f} vs ref")
+  k2.metric("90% INTERVAL",f"${qq[0,j]:,.0f} – ${qq[6,j]:,.0f}")
+  k3.metric("P(UP)",f"{p_up*100:.1f}%")
+  k4.metric("P(DOWN)",f"{p_down*100:.1f}%")
+  st.markdown("#### FORECAST DISTRIBUTION BY HORIZON")
+  rows=[]
+  for ix,h in enumerate(hs):
+   arr=paths[:,ix]
+   rows.append({
+    "Horizon":horizon_labels[int(h)],
+    "P05":f"${np.quantile(arr,.05):,.2f}",
+    "P25":f"${np.quantile(arr,.25):,.2f}",
+    "P50":f"${np.quantile(arr,.50):,.2f}",
+    "P75":f"${np.quantile(arr,.75):,.2f}",
+    "P95":f"${np.quantile(arr,.95):,.2f}",
+    "P(UP)":f"{np.mean(arr>spot0)*100:.1f}%",
+    "P(DOWN)":f"{np.mean(arr<spot0)*100:.1f}%"
+   })
+  st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+  st.info(f"MODEL STATUS: EXPERIMENTAL · Volatility input {v*100:.4f}% per bar · {len(paths):,} simulated scenarios. Quantiles and directional frequencies are simulation outputs, not calibrated real-world probabilities.")
+  st.caption("P05–P95 chứa 90% kết quả mô phỏng tại từng thời hạn; không có nghĩa giá chắc chắn đi qua toàn bộ vùng. Mô hình hiện chưa có walk-forward calibration/Brier score, vì vậy chỉ dùng tham khảo, không phát tín hiệu giao dịch.")
+ else:
+  st.warning("Need more than 30 valid OHLC bars to calculate the forecast workspace.")
 with tabs[3]:
  st.markdown("#### TRADE INTELLIGENCE · M.A.R.S. DECISION COCKPIT")
  if len(df)>50:
