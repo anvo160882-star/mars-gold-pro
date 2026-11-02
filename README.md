@@ -1,2 +1,1 @@
-# mars-gold-pro
-M.A.R.S. GOLD PRO – Live XAU/USD Analysis Dashboard
+# M.A.R.S. GOLD PRO\n\nUpload app.py and requirements.txt to the repository root. Deploy at https://share.streamlit.io using GitHub, repository anvo160882-star/mars-gold-pro, branch main, entrypoint app.py.\n\nData integrity: XAUS is indicative, not executable. Intraday are sampled prices, not broker OHLC. Trade Intelligence remains NO TRADE until multi-timeframe OHLC and validation are implemented. The 3D surface is historical volatility, not a price forecast.\n
